@@ -241,6 +241,17 @@ input:focus,textarea:focus,select:focus{outline:none;border-color:var(--accent)}
   .main > .page.on{max-width:1400px;margin:0 auto}
 }
 
+/* ════════ 全屏按钮（鸿蒙等浏览器隐藏地址栏用） ════════ */
+.fs-fab{
+  display:none;position:fixed;right:14px;bottom:calc(18px + env(safe-area-inset-bottom,0));
+  z-index:60;width:48px;height:48px;border-radius:50%;
+  background:var(--accent);color:#fff;border:none;
+  box-shadow:0 4px 16px rgba(0,0,0,.22);
+  font-size:22px;line-height:48px;text-align:center;padding:0;
+  -webkit-tap-highlight-color:transparent;
+}
+@media (max-width:699px){ .fs-fab{display:block} }
+
 /* ════════ 数据看板增强：指标卡 / 图表 / 提醒 ════════ */
 .kpi-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--gap)}
 @media(min-width:700px){.kpi-grid{grid-template-columns:repeat(4,minmax(0,1fr))}}
@@ -827,6 +838,7 @@ input:focus,textarea:focus,select:focus{outline:none;border-color:var(--accent)}
   </main>
 </div>
 
+<button class="fs-fab" id="fsFab" onclick="App.toggleFullscreen()" title="切换全屏">⛶</button>
 <div class="toast" id="toast"></div>
 
 <script>
@@ -1438,6 +1450,28 @@ const App = {
 
     this.checkBackup();
     if (typeof Sync !== 'undefined') Sync.init();
+    this.initFullscreen();
+  },
+
+  /** 全屏切换：让鸿蒙等浏览器隐藏地址栏，接近 App 体验 */
+  initFullscreen(){
+    document.addEventListener('fullscreenchange', () => {
+      const el = document.getElementById('fsFab');
+      if (el) el.textContent = document.fullscreenElement ? '⤡' : '⛶';
+    });
+  },
+  toggleFullscreen(){
+    try {
+      if (document.fullscreenElement){
+        document.exitFullscreen?.();
+      } else {
+        (document.documentElement.requestFullscreen
+          || document.documentElement.webkitRequestFullscreen
+          || (()=>{})).call(document.documentElement);
+      }
+    } catch(e){
+      UI.toast('这个浏览器不支持全屏按钮，用浏览器菜单里的全屏试试');
+    }
   },
 
   /** 头像走 secret 通道：天然不进备份、不进同步，只留本机 */
