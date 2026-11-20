@@ -333,6 +333,21 @@ input:focus,textarea:focus,select:focus{outline:none;border-color:var(--accent)}
       </div>
 
       <div class="card">
+        <h2>📉 月度课消扣减</h2>
+        <p class="hint" style="margin-top:0;margin-bottom:12px">老师给了新的上课记录后，在这里扣减。选班级 → 每人填「本次消耗课次」和「本次课消金额」→ 一键扣减，剩余课次和剩余课消自动减少，并记一笔流水方便对账。只填有上课的人，没上课的留空即可。</p>
+        <div class="row">
+          <select id="engDeductClass" onchange="English.renderDeductList()" style="flex:1;font-size:16px;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--text)">
+            <option value="">选择班级</option>
+          </select>
+        </div>
+        <div id="engDeductList" style="margin-top:12px"></div>
+        <div class="row" style="margin-top:12px">
+          <button class="btn" onclick="English.batchDeduct()">批量扣减</button>
+        </div>
+        <div id="engDeductLog" style="margin-top:16px"></div>
+      </div>
+
+      <div class="card">
         <h2>💰 月末课消核对 / 薪资造表</h2>
         <div id="engSettleList"></div>
         <div class="row" style="margin-top:12px">
@@ -1470,6 +1485,7 @@ const English = {
     this.renderClasses();
     this.renderSettle();
     this.search();
+    this.fillDeductClass();
   },
 
   /* ---------- 班级台账 ---------- */
@@ -1506,13 +1522,57 @@ const English = {
     const students = Store.list('eng_students', (a,b) => (b._u||0)-(a._u||0))
       .filter(s => s.classId === classId);
     if (!students.length) return '<div class="empty">这个班还没有学员</div>';
-    return students.map(s => `<div class="item">
-      <span class="grow"><b>${Util.esc(s.name)}</b>
-        <span style="font-size:13px;color:var(--text-dim)"> · 缴 ¥${Util.esc(s.paid||'0')} · 剩 ${Util.esc(s.remain||'0')} 次</span>
-        ${(s.total||s.totalCost||s.remainFee||s.note)?`<br><span style="font-size:12px;color:var(--text-dim)">${s.total?'总 '+Util.esc(s.total)+' 次 · ':''}${s.totalCost?'总课消 ¥'+Util.esc(s.totalCost)+' · ':''}${s.remainFee?'剩课消 ¥'+Util.esc(s.remainFee):''}${s.note?' · '+Util.esc(s.note):''}</span>`:''}
-        </span>
-      <button class="del" onclick="English.delStudent('${s.id}')">✕</button>
-    </div>`).join('');
+    return students.map(s => {
+      if (this._editStuId === s.id) return this._studentEditHTML(s);
+      return `<div class="item">
+        <span class="grow"><b>${Util.esc(s.name)}</b>
+          <span style="font-size:13px;color:var(--text-dim)"> · 缴 ¥${Util.esc(s.paid||'0')} · 剩 ${Util.esc(s.remain||'0')} 次</span>
+          ${(s.total||s.totalCost||s.remainFee||s.note)?`<br><span style="font-size:12px;color:var(--text-dim)">${s.total?'总 '+Util.esc(s.total)+' 次 · ':''}${s.totalCost?'总课消 ¥'+Util.esc(s.totalCost)+' · ':''}${s.remainFee?'剩课消 ¥'+Util.esc(s.remainFee):''}${s.note?' · '+Util.esc(s.note):''}</span>`:''}
+          </span>
+        <button class="btn ghost" style="padding:6px 10px;font-size:13px" onclick="English.editStudent('${s.id}')">改</button>
+        <button class="del" onclick="English.delStudent('${s.id}')">✕</button>
+      </div>`;
+    }).join('');
+  },
+
+  /** 学员行内编辑（改剩余课次 / 缴费 / 备注等，老师新表上的值直接覆盖） */
+  _editStuId: null,
+  _studentEditHTML(s){
+    const f = (id, ph, val, type) => `<input type="${type||'text'}" id="${id}" value="${Util.esc(s[val]||'')}" placeholder="${ph}" style="font-size:16px">`;
+    return `<div style="border:1px solid var(--accent);border-radius:10px;padding:12px;margin:6px 0;background:var(--card)">
+      <div style="font-size:14px;color:var(--text-dim);margin-bottom:8px">编辑学员 · ${Util.esc(s.name)}</div>
+      <div class="row" style="margin-bottom:8px">
+        ${f('edStuName','姓名','name')}
+        ${f('edStuPaid','缴费金额','paid','number')}
+      </div>
+      <div class="row" style="margin-bottom:8px">
+        ${f('edStuTotal','总课次','total','number')}
+        ${f('edStuRemain','剩余课次','remain','number')}
+      </div>
+      <div class="row" style="margin-bottom:8px">
+        ${f('edStuRemainFee','剩余课消金额','remainFee','number')}
+        ${f('edStuNote','备注','note')}
+      </div>
+      <div class="row">
+        <button class="btn" onclick="English.saveStudentEdit('${s.id}')">保存</button>
+        <button class="btn ghost" onclick="English.cancelStudentEdit()">取消</button>
+      </div>
+    </div>`;
+  },
+  editStudent(id){ this._editStuId = id; this.renderClasses(); },
+  cancelStudentEdit(){ this._editStuId = null; this.renderClasses(); },
+  saveStudentEdit(id){
+    const gv = x => (document.getElementById(x)?.value||'').trim();
+    const name = gv('edStuName');
+    if (!name){ UI.toast('姓名不能空'); return; }
+    Store.upsert('eng_students', {
+      id, name,
+      paid:gv('edStuPaid'), total:gv('edStuTotal'),
+      remain:gv('edStuRemain'), remainFee:gv('edStuRemainFee'), note:gv('edStuNote')
+    });
+    this._editStuId = null;
+    this.renderClasses(); this.search(); this.fillDeductClass();
+    UI.toast('已保存');
   },
 
   openClass(id){ this._openClass = (this._openClass === id ? null : id); this.renderClasses(); },
@@ -1552,8 +1612,81 @@ const English = {
     nEl.value=''; ['engStuPaid','engStuTotal','engStuRemain','engStuRemainFee','engStuNote'].forEach(id=>{const e=document.getElementById(id); if(e) e.value='';});
     this.renderClasses();
     this.search();
+    this.fillDeductClass();
   },
-  delStudent(id){ Store.softDelete('eng_students', id); this.renderClasses(); this.search(); },
+  delStudent(id){ Store.softDelete('eng_students', id); this.renderClasses(); this.search(); this.fillDeductClass(); },
+
+  /* ---------- 月度课消扣减 ---------- */
+  fillDeductClass(){
+    const sel = document.getElementById('engDeductClass');
+    if (!sel) return;
+    const classes = Store.list('eng_classes', (a,b) => (b._u||0)-(a._u||0));
+    const prev = sel.value;
+    sel.innerHTML = '<option value="">选择班级</option>' +
+      classes.map(c => `<option value="${c.id}">${Util.esc(c.name)}${c.campus?' · '+Util.esc(c.campus):''}</option>`).join('');
+    if (classes.some(c => c.id === prev)) sel.value = prev;
+    this.renderDeductList();
+  },
+  renderDeductList(){
+    const sel = document.getElementById('engDeductClass');
+    const box = document.getElementById('engDeductList');
+    if (!sel || !box) return;
+    const cid = sel.value;
+    if (!cid){ box.innerHTML = '<div class="empty">先选一个班级，列出学员后填本次上课情况</div>'; this.renderDeductLog(); return; }
+    const students = Store.list('eng_students').filter(s => s.classId === cid);
+    if (!students.length){ box.innerHTML = '<div class="empty">这个班还没有学员</div>'; this.renderDeductLog(); return; }
+    box.innerHTML = `<div style="font-size:13px;color:var(--text-dim);margin-bottom:8px">每行：姓名 ｜ 当前剩余 ｜ 本次消耗课次 ｜ 本次课消金额</div>` +
+      students.map(s => `<div class="row" style="align-items:center;margin-bottom:8px;flex-wrap:wrap">
+        <span style="min-width:80px;flex:0 0 auto"><b>${Util.esc(s.name)}</b></span>
+        <span style="font-size:12px;color:var(--text-dim);min-width:120px;flex:1">剩 ${Util.esc(s.remain||'0')} 次 / ¥${Util.esc(s.remainFee||'0')}</span>
+        <input type="number" inputmode="numeric" id="dc_${s.id}_t" placeholder="消耗课次" style="width:96px;font-size:16px">
+        <input type="number" inputmode="decimal" id="dc_${s.id}_f" placeholder="课消金额" style="width:96px;font-size:16px">
+      </div>`).join('');
+    this.renderDeductLog();
+  },
+  batchDeduct(){
+    const sel = document.getElementById('engDeductClass');
+    const cid = sel ? sel.value : '';
+    if (!cid){ UI.toast('先选班级'); return; }
+    const students = Store.list('eng_students').filter(s => s.classId === cid);
+    const num = id => { const e = document.getElementById(id); return e && e.value !== '' ? parseFloat(e.value) : 0; };
+    let n = 0, log = [];
+    const batchId = Util.uid(), stamp = Util.today();
+    students.forEach(s => {
+      const used = num('dc_' + s.id + '_t');
+      const fee  = num('dc_' + s.id + '_f');
+      if (!used && !fee) return;
+      const oldRemain = parseFloat(s.remain||0), oldFee = parseFloat(s.remainFee||0);
+      const newRemain = Math.max(0, (isNaN(oldRemain)?0:oldRemain) - (used||0));
+      const newFee = Math.max(0, (isNaN(oldFee)?0:oldFee) - (fee||0));
+      Store.upsert('eng_students', Object.assign({}, s, {
+        remain:String(newRemain), remainFee:String(newFee), _u: Date.now()
+      }));
+      log.push({ id:Util.uid(), batchId, date:stamp, className:(Store.list('eng_classes').find(c=>c.id===cid)||{}).name||'', name:s.name, used:used||0, fee:fee||0, fromRemain:oldRemain, toRemain:newRemain, fromFee:oldFee, toFee:newFee, _u:Date.now() });
+      n++;
+    });
+    if (!n){ UI.toast('没填任何消耗，没扣减'); return; }
+    const logs = Store.get('eng_consume_log', []);
+    Store.set('eng_consume_log', log.concat(logs));
+    this.renderClasses(); this.search(); this.renderDeductList();
+    UI.toast('已扣减 ' + n + ' 名学员');
+  },
+  renderDeductLog(){
+    const box = document.getElementById('engDeductLog');
+    if (!box) return;
+    const logs = Store.list('eng_consume_log', (a,b) => (b._u||0)-(a._u||0)).slice(0, 30);
+    if (!logs.length){ box.innerHTML = '<div class="hint">还没有扣减记录。每次批量扣减后，这里会留一笔，方便月末对账。</div>'; return; }
+    box.innerHTML = '<div style="font-size:14px;font-weight:600;margin-bottom:6px">最近扣减流水</div>' +
+      logs.map(x => `<div style="font-size:13px;color:var(--text-dim);padding:5px 0;border-bottom:1px solid var(--line)">
+        ${Util.esc(x.date)} · ${Util.esc(x.className)} · <b>${Util.esc(x.name)}</b> 扣 ${x.used} 次 / ¥${x.fee} ｜ 剩 ${x.fromRemain}→${x.toRemain} 次，课消 ¥${x.fromFee}→¥${x.toFee}
+        <button class="del" style="float:right" onclick="English.delDeductLog('${x.id}')">✕</button>
+      </div>`).join('');
+  },
+  delDeductLog(id){
+    if (!confirm('删掉这条扣减流水？（只是隐藏记录，不会把课次加回去）')) return;
+    Store.softDelete('eng_consume_log', id);
+    this.renderDeductLog();
+  },
 
   /* ---------- 学员快速查询（客户管理式） ---------- */
   search(){
